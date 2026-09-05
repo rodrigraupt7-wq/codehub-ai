@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 type ProjectFile = {
   name: string;
@@ -85,6 +86,8 @@ function CodeEditor({
 }
 
 export default function Home() {
+  const supabase = createClient();
+
   const [activeTool, setActiveTool] = useState<Tool>("generator");
 
   const [prompt, setPrompt] = useState("");
@@ -113,12 +116,30 @@ export default function Home() {
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
+  // CONTA SUPABASE
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
   const currentFile = useMemo(
     () => files.find((file) => file.name === selectedFile) ?? null,
     [files, selectedFile]
   );
 
   useEffect(() => {
+    async function loadUser() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        window.location.href = "/login";
+        return;
+      }
+
+      setUserEmail(user.email ?? null);
+    }
+
+    loadUser();
+
     try {
       const savedProjects = localStorage.getItem("codehub_projects");
       const savedHistory = localStorage.getItem("codehub_history");
@@ -498,6 +519,11 @@ export default function Home() {
     }
 
     return html;
+  }
+
+  async function logout() {
+    await supabase.auth.signOut();
+    window.location.href = "/login";
   }
 
   function renderChat() {
@@ -1200,6 +1226,23 @@ export default function Home() {
         </nav>
 
         <div className="sidebar-bottom">
+
+          {/* CONTA SUPABASE */}
+          <div className="account-box">
+            <div className="account-label">Conta</div>
+
+            <div className="account-email">
+              {userEmail || "A carregar..."}
+            </div>
+
+            <button
+              className="account-logout"
+              onClick={logout}
+            >
+              Sair
+            </button>
+          </div>
+
           <div className="credits">
             <span>IA</span>
             <strong>Gemini Online</strong>
@@ -1319,6 +1362,46 @@ export default function Home() {
 
         .sidebar-bottom {
           margin-top: auto;
+        }
+
+        /* CONTA */
+
+        .account-box {
+          padding: 10px 8px;
+          margin-bottom: 8px;
+          border: 1px solid #292d36;
+          border-radius: 9px;
+          background: #111318;
+        }
+
+        .account-label {
+          font-size: 11px;
+          color: #777d88;
+          margin-bottom: 5px;
+        }
+
+        .account-email {
+          color: #e9eaf0;
+          font-size: 12px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .account-logout {
+          width: 100%;
+          margin-top: 8px;
+          padding: 7px 10px;
+          border: 1px solid #292d36;
+          border-radius: 7px;
+          background: #181a20;
+          color: #cfd2da;
+          font-size: 11px;
+        }
+
+        .account-logout:hover {
+          background: #242730;
+          color: white;
         }
 
         .credits {
@@ -1487,7 +1570,9 @@ export default function Home() {
         }
 
         @keyframes spin {
-          to { transform: rotate(360deg); }
+          to {
+            transform: rotate(360deg);
+          }
         }
 
         .response-box,
@@ -1983,7 +2068,8 @@ export default function Home() {
           .create-button,
           .nav-item,
           .credits,
-          .gemini-status {
+          .gemini-status,
+          .account-box {
             font-size: 0;
           }
 
