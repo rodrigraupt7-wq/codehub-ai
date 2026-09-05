@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
-import ollama from "ollama";
+import { GoogleGenAI } from "@google/genai";
 
-const MODEL = "qwen2.5-coder:7b";
+const MODEL = "gemini-3.6-flash";
+
+const SYSTEM_INSTRUCTION = `
+És o CodeHub AI, um engenheiro de software sénior.
+
+Cria projetos web REALMENTE funcionais, modernos e profissionais.
+Responde em português de Portugal.
+`;
 
 export async function POST(request: Request) {
   try {
@@ -13,6 +20,10 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+
+    const ai = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+    });
 
     // =====================================================
     // ETAPA 1 — GERAR O PROJETO
@@ -70,22 +81,24 @@ IMPORTANTE:
 Todos os ficheiros devem funcionar em conjunto.
 `;
 
-    const generated = await ollama.chat({
+    const generated = await ai.models.generateContent({
       model: MODEL,
-      messages: [
-        {
-          role: "system",
-          content:
-            "És um programador sénior especializado em criar aplicações web funcionais.",
-        },
+      contents: [
         {
           role: "user",
-          content: generationPrompt,
+          parts: [{ text: generationPrompt }],
         },
       ],
+      config: {
+        systemInstruction: SYSTEM_INSTRUCTION,
+      },
     });
 
-    const generatedProject = generated.message.content;
+    const generatedProject = generated.text;
+
+    if (!generatedProject) {
+      throw new Error("A IA não devolveu nenhum projeto.");
+    }
 
     // =====================================================
     // ETAPA 2 — REVISÃO E CORREÇÃO AUTOMÁTICA
@@ -103,6 +116,7 @@ PROJETO ORIGINAL:
 ${generatedProject}
 
 ANTES DE DEVOLVER:
+
 1. Analisa todos os ficheiros.
 2. Procura erros de HTML.
 3. Procura erros de CSS.
@@ -158,22 +172,25 @@ CÓDIGO COMPLETO
 \`\`\`
 `;
 
-    const reviewed = await ollama.chat({
+    const reviewed = await ai.models.generateContent({
       model: MODEL,
-      messages: [
-        {
-          role: "system",
-          content:
-            "És um especialista em revisão, debugging e correção de aplicações web.",
-        },
+      contents: [
         {
           role: "user",
-          content: reviewPrompt,
+          parts: [{ text: reviewPrompt }],
         },
       ],
+      config: {
+        systemInstruction:
+          "És um especialista em revisão, debugging e correção de aplicações web.",
+      },
     });
 
-    const finalProject = reviewed.message.content;
+    const finalProject = reviewed.text;
+
+    if (!finalProject) {
+      throw new Error("A IA não devolveu o projeto revisto.");
+    }
 
     // =====================================================
     // DEVOLVER PROJETO FINAL
@@ -187,8 +204,7 @@ CÓDIGO COMPLETO
 
     return NextResponse.json(
       {
-        error:
-          "Não foi possível gerar o projeto. Verifica se o Ollama está ligado.",
+        error: "Não foi possível gerar o projeto com a IA.",
       },
       { status: 500 }
     );
