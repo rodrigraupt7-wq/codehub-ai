@@ -33,6 +33,8 @@ type HistoryItem = {
   date: string;
 };
 
+type UserPlan = "free" | "pro" | "promax";
+
 function getLanguage(name: string) {
   if (name.endsWith(".html")) return "html";
   if (name.endsWith(".css")) return "css";
@@ -118,6 +120,9 @@ export default function Home() {
 
   // CONTA SUPABASE
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userPlan, setUserPlan] = useState<UserPlan>("free");
+  const [userCredits, setUserCredits] = useState(0);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   const currentFile = useMemo(
     () => files.find((file) => file.name === selectedFile) ?? null,
@@ -126,16 +131,40 @@ export default function Home() {
 
   useEffect(() => {
     async function loadUser() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
 
-      if (!user) {
-        window.location.href = "/login";
-        return;
+        if (!user) {
+          window.location.href = "/login";
+          return;
+        }
+
+        setUserEmail(user.email ?? null);
+
+        const { data: profile, error } = await supabase
+          .from("profiles")
+          .select("plan, credits")
+          .eq("id", user.id)
+          .single();
+
+        if (!error && profile) {
+          const plan =
+            profile.plan === "pro" ||
+            profile.plan === "promax" ||
+            profile.plan === "free"
+              ? profile.plan
+              : "free";
+
+          setUserPlan(plan);
+          setUserCredits(profile.credits ?? 0);
+        }
+      } catch (error) {
+        console.error("Erro ao carregar perfil:", error);
+      } finally {
+        setProfileLoading(false);
       }
-
-      setUserEmail(user.email ?? null);
     }
 
     loadUser();
@@ -144,12 +173,29 @@ export default function Home() {
       const savedProjects = localStorage.getItem("codehub_projects");
       const savedHistory = localStorage.getItem("codehub_history");
 
-      if (savedProjects) setProjects(JSON.parse(savedProjects));
-      if (savedHistory) setHistory(JSON.parse(savedHistory));
+      if (savedProjects) {
+        setProjects(JSON.parse(savedProjects));
+      }
+
+      if (savedHistory) {
+        setHistory(JSON.parse(savedHistory));
+      }
     } catch {
       console.log("Não foi possível carregar os dados locais.");
     }
   }, []);
+
+  function getPlanName() {
+    if (userPlan === "pro") return "⭐ Pro";
+    if (userPlan === "promax") return "🚀 Pro Max";
+    return "🆓 Free";
+  }
+
+  function getPlanClass() {
+    if (userPlan === "pro") return "plan-pro";
+    if (userPlan === "promax") return "plan-promax";
+    return "plan-free";
+  }
 
   function addHistory(type: string, details: string) {
     const item: HistoryItem = {
@@ -381,6 +427,7 @@ export default function Home() {
       }
 
       setToolResult(data.response || "");
+
       addHistory(
         "Testes",
         `Testes analisados para ${currentFile?.name || toolFilename}`
@@ -563,6 +610,7 @@ export default function Home() {
                 <div className="message-role">
                   {message.role === "user" ? "Tu" : "CodeHub AI"}
                 </div>
+
                 <div className="message-content">
                   {message.content}
                 </div>
@@ -750,6 +798,7 @@ export default function Home() {
                 <div className="project-info">
                   <strong>{project.name}</strong>
                   <span>{project.files.length} ficheiros</span>
+
                   <small>
                     {new Date(project.updatedAt).toLocaleString("pt-PT")}
                   </small>
@@ -1036,7 +1085,9 @@ export default function Home() {
             />
 
             <div className="prompt-footer">
-              <span>Enter para gerar • Shift + Enter para nova linha</span>
+              <span>
+                Enter para gerar • Shift + Enter para nova linha
+              </span>
 
               <button
                 className="generate-button"
@@ -1227,7 +1278,7 @@ export default function Home() {
 
         <div className="sidebar-bottom">
 
-          {/* CONTA SUPABASE */}
+          {/* CONTA */}
           <div className="account-box">
             <div className="account-label">Conta</div>
 
@@ -1243,6 +1294,47 @@ export default function Home() {
             </button>
           </div>
 
+          {/* PLANO */}
+          <div className={`plan-box ${getPlanClass()}`}>
+            <div className="plan-box-header">
+              <div>
+                <span className="plan-label">PLANO ATUAL</span>
+
+                <strong className="plan-name">
+                  {profileLoading ? "A carregar..." : getPlanName()}
+                </strong>
+              </div>
+
+              <div className="plan-icon">
+                {userPlan === "free"
+                  ? "🆓"
+                  : userPlan === "pro"
+                    ? "⭐"
+                    : "🚀"}
+              </div>
+            </div>
+
+            <div className="credits-row">
+              <span>Créditos</span>
+
+              <strong>
+                {profileLoading ? "..." : userCredits}
+              </strong>
+            </div>
+
+            <button
+              className="upgrade-button"
+              onClick={() => {
+                window.location.href = "/pricing";
+              }}
+            >
+              {userPlan === "free"
+                ? "⭐ Ver planos"
+                : "⚡ Gerir plano"}
+            </button>
+          </div>
+
+          {/* GEMINI */}
           <div className="credits">
             <span>IA</span>
             <strong>Gemini Online</strong>
@@ -1286,7 +1378,11 @@ export default function Home() {
           min-height: 100vh;
           display: flex;
           background:
-            radial-gradient(circle at 55% 10%, rgba(99,102,241,.09), transparent 35%),
+            radial-gradient(
+              circle at 55% 10%,
+              rgba(99,102,241,.09),
+              transparent 35%
+            ),
             #08090c;
         }
 
@@ -1319,7 +1415,11 @@ export default function Home() {
           display: grid;
           place-items: center;
           border-radius: 10px;
-          background: linear-gradient(135deg,#7c3aed,#4f46e5);
+          background: linear-gradient(
+            135deg,
+            #7c3aed,
+            #4f46e5
+          );
           font-weight: 800;
         }
 
@@ -1404,10 +1504,118 @@ export default function Home() {
           color: white;
         }
 
+        /* PLANO */
+
+        .plan-box {
+          margin-bottom: 8px;
+          padding: 11px 9px;
+          border: 1px solid #292d36;
+          border-radius: 10px;
+          background: #111318;
+        }
+
+        .plan-box-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          margin-bottom: 11px;
+        }
+
+        .plan-box-header > div:first-child {
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .plan-label {
+          color: #777d88;
+          font-size: 9px;
+          font-weight: 700;
+          letter-spacing: .08em;
+        }
+
+        .plan-name {
+          color: #f1f1f5;
+          font-size: 12px;
+          font-weight: 750;
+        }
+
+        .plan-icon {
+          width: 30px;
+          height: 30px;
+          display: grid;
+          place-items: center;
+          border-radius: 8px;
+          background: #181a21;
+          font-size: 15px;
+        }
+
+        .plan-free {
+          border-color: #292d36;
+        }
+
+        .plan-pro {
+          border-color: rgba(99, 91, 255, .45);
+          background:
+            linear-gradient(
+              135deg,
+              rgba(99,91,255,.10),
+              #111318
+            );
+        }
+
+        .plan-promax {
+          border-color: rgba(168, 85, 247, .55);
+          background:
+            linear-gradient(
+              135deg,
+              rgba(168,85,247,.12),
+              #111318
+            );
+        }
+
+        .credits-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 9px;
+          padding-top: 8px;
+          border-top: 1px solid #22252d;
+        }
+
+        .credits-row span {
+          color: #777d88;
+          font-size: 10px;
+        }
+
+        .credits-row strong {
+          color: #a78bfa;
+          font-size: 12px;
+        }
+
+        .upgrade-button {
+          width: 100%;
+          border: 0;
+          border-radius: 7px;
+          padding: 8px;
+          background: #635bff;
+          color: white;
+          font-size: 11px;
+          font-weight: 700;
+          transition: .15s;
+        }
+
+        .upgrade-button:hover {
+          background: #716aff;
+          transform: translateY(-1px);
+        }
+
         .credits {
           display: flex;
           justify-content: space-between;
-          padding: 12px 8px;
+          padding: 10px 8px;
           color: #777d88;
           font-size: 12px;
         }
@@ -1799,7 +2007,10 @@ export default function Home() {
 
         .projects-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill,minmax(280px,1fr));
+          grid-template-columns: repeat(
+            auto-fill,
+            minmax(280px,1fr)
+          );
           gap: 12px;
         }
 
@@ -2069,7 +2280,8 @@ export default function Home() {
           .nav-item,
           .credits,
           .gemini-status,
-          .account-box {
+          .account-box,
+          .plan-box {
             font-size: 0;
           }
 
@@ -2103,6 +2315,28 @@ export default function Home() {
           }
 
           .header-actions .secondary-button {
+            display: none;
+          }
+
+          .plan-box {
+            padding: 5px;
+          }
+
+          .plan-box-header {
+            justify-content: center;
+          }
+
+          .plan-box-header > div:first-child {
+            display: none;
+          }
+
+          .plan-icon {
+            width: 34px;
+            height: 34px;
+          }
+
+          .credits-row,
+          .upgrade-button {
             display: none;
           }
         }
