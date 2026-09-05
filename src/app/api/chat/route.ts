@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import ollama from "ollama";
+import { GoogleGenAI } from "@google/genai";
 
 const MODEL = "qwen2.5-coder:7b";
 
