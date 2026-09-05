@@ -1202,12 +1202,12 @@ export default function Home() {
         <div className="sidebar-bottom">
           <div className="credits">
             <span>IA</span>
-            <strong>∞ Local</strong>
+            <strong>Gemini Online</strong>
           </div>
 
-          <div className="ollama-status">
+          <div className="gemini-status">
             <span />
-            Ollama local
+            Gemini AI online
           </div>
         </div>
       </aside>
@@ -1333,7 +1333,7 @@ export default function Home() {
           color: #b4b8c1;
         }
 
-        .ollama-status {
+        .gemini-status {
           display: flex;
           align-items: center;
           gap: 8px;
@@ -1342,7 +1342,7 @@ export default function Home() {
           font-size: 11px;
         }
 
-        .ollama-status span {
+        .gemini-status span {
           width: 7px;
           height: 7px;
           border-radius: 50%;
@@ -1983,7 +1983,7 @@ export default function Home() {
           .create-button,
           .nav-item,
           .credits,
-          .ollama-status {
+          .gemini-status {
             font-size: 0;
           }
 

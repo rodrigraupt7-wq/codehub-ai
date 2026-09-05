@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import ollama from "ollama";
+import { GoogleGenAI } from "@google/genai";
+
+const MODEL = "gemini-3.6-flash";
 
 export async function POST(request: Request) {
   try {
@@ -12,12 +14,11 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await ollama.chat({
-      model: "qwen2.5-coder:7b",
-      messages: [
-        {
-          role: "system",
-          content: `
+    const ai = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+    });
+
+    const prompt = `
 És o sistema de debugging do CodeHub AI.
 
 Analisa código fornecido pelo utilizador.
@@ -40,11 +41,7 @@ IMPORTANTE:
 - Não uses "...".
 - Não omitas nenhuma parte do código.
 - Devolve o ficheiro COMPLETO.
-`,
-        },
-        {
-          role: "user",
-          content: `
+
 Ficheiro: ${filename}
 
 Código:
@@ -52,21 +49,33 @@ Código:
 ${code}
 
 Analisa cuidadosamente este código, corrige todos os problemas encontrados e devolve o ficheiro completo corrigido.
-`,
+`;
+
+    const result = await ai.models.generateContent({
+      model: MODEL,
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }],
         },
       ],
     });
 
+    const fixedCode = result.text;
+
+    if (!fixedCode) {
+      throw new Error("A IA não devolveu código corrigido.");
+    }
+
     return NextResponse.json({
-      code: result.message.content,
+      code: fixedCode,
     });
   } catch (error) {
     console.error("Erro ao corrigir código:", error);
 
     return NextResponse.json(
       {
-        error:
-          "Não foi possível corrigir o código. Verifica se o Ollama está a funcionar.",
+        error: "Não foi possível corrigir o código com a IA.",
       },
       { status: 500 }
     );

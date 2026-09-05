@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import ollama from "ollama";
+import { GoogleGenAI } from "@google/genai";
 
-const MODEL = "qwen2.5-coder:7b";
+const MODEL = "gemini-3.6-flash";
 
 export async function POST(request: Request) {
   try {
@@ -14,12 +14,11 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await ollama.chat({
-      model: MODEL,
-      messages: [
-        {
-          role: "system",
-          content: `
+    const ai = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+    });
+
+    const prompt = `
 És o sistema de testes do CodeHub AI.
 
 Analisa o código fornecido.
@@ -39,11 +38,7 @@ Não inventes funcionalidades.
 Responde em português de Portugal.
 
 Não uses "..." para esconder código.
-`,
-        },
-        {
-          role: "user",
-          content: `
+
 Ficheiro: ${filename}
 
 Código:
@@ -51,21 +46,33 @@ Código:
 ${code}
 
 Analisa este código e cria uma estratégia completa de testes.
-`,
+`;
+
+    const result = await ai.models.generateContent({
+      model: MODEL,
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }],
         },
       ],
     });
 
+    const response = result.text;
+
+    if (!response) {
+      throw new Error("A IA não devolveu uma análise.");
+    }
+
     return NextResponse.json({
-      response: result.message.content,
+      response,
     });
   } catch (error) {
     console.error("Erro nos testes:", error);
 
     return NextResponse.json(
       {
-        error:
-          "Não foi possível gerar os testes. Verifica se o Ollama está ligado.",
+        error: "Não foi possível gerar os testes com a IA.",
       },
       { status: 500 }
     );

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import ollama from "ollama";
+import { GoogleGenAI } from "@google/genai";
 
-const MODEL = "qwen2.5-coder:7b";
+const MODEL = "gemini-3.6-flash";
 
 export async function POST(request: Request) {
   try {
@@ -14,18 +14,16 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await ollama.chat({
-      model: MODEL,
-      messages: [
-        {
-          role: "system",
-          content: `
+    const ai = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+    });
+
+    const prompt = `
 És o sistema "Melhorar Código" do CodeHub AI.
 
 A tua tarefa é melhorar o código fornecido pelo utilizador.
 
 Deves:
-
 - melhorar a qualidade do código;
 - melhorar a organização;
 - remover código desnecessário;
@@ -38,7 +36,6 @@ Deves:
 - manter compatibilidade com o restante projeto.
 
 IMPORTANTE:
-
 - NÃO mudes o objetivo do código.
 - NÃO removas funcionalidades.
 - NÃO uses Markdown.
@@ -47,11 +44,7 @@ IMPORTANTE:
 - NÃO uses "...".
 - NÃO omitas código.
 - DEVOLVE O FICHEIRO COMPLETO.
-`,
-        },
-        {
-          role: "user",
-          content: `
+
 Ficheiro: ${filename}
 
 Código atual:
@@ -59,21 +52,33 @@ Código atual:
 ${code}
 
 Melhora este código cuidadosamente e devolve o ficheiro completo melhorado.
-`,
+`;
+
+    const result = await ai.models.generateContent({
+      model: MODEL,
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }],
         },
       ],
     });
 
+    const improvedCode = result.text;
+
+    if (!improvedCode) {
+      throw new Error("A IA não devolveu código.");
+    }
+
     return NextResponse.json({
-      code: result.message.content,
+      code: improvedCode,
     });
   } catch (error) {
     console.error("Erro ao melhorar código:", error);
 
     return NextResponse.json(
       {
-        error:
-          "Não foi possível melhorar o código. Verifica se o Ollama está a funcionar.",
+        error: "Não foi possível melhorar o código com a IA.",
       },
       { status: 500 }
     );

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import ollama from "ollama";
+import { GoogleGenAI } from "@google/genai";
 
-const MODEL = "qwen2.5-coder:7b";
+const MODEL = "gemini-3.6-flash";
 
 export async function POST(request: Request) {
   try {
@@ -21,12 +21,11 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await ollama.chat({
-      model: MODEL,
-      messages: [
-        {
-          role: "system",
-          content: `
+    const ai = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+    });
+
+    const prompt = `
 És o sistema "Converter Código" do CodeHub AI.
 
 Converte código de uma linguagem para outra.
@@ -47,11 +46,7 @@ REGRAS:
 - NÃO omitas nenhuma parte do código.
 
 Devolve APENAS o código final.
-`,
-        },
-        {
-          role: "user",
-          content: `
+
 Ficheiro original: ${filename}
 
 LINGUAGEM DE DESTINO:
@@ -62,21 +57,33 @@ CÓDIGO ORIGINAL:
 ${code}
 
 Converte este código completamente para ${targetLanguage}.
-`,
+`;
+
+    const result = await ai.models.generateContent({
+      model: MODEL,
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }],
         },
       ],
     });
 
+    const convertedCode = result.text;
+
+    if (!convertedCode) {
+      throw new Error("A IA não devolveu código convertido.");
+    }
+
     return NextResponse.json({
-      code: result.message.content,
+      code: convertedCode,
     });
   } catch (error) {
     console.error("Erro ao converter código:", error);
 
     return NextResponse.json(
       {
-        error:
-          "Não foi possível converter o código. Verifica se o Ollama está a funcionar.",
+        error: "Não foi possível converter o código com a IA.",
       },
       { status: 500 }
     );
