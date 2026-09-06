@@ -12,12 +12,11 @@ type ProjectFile = {
 type Tool =
   | "generator"
   | "chat"
-  | "debugger"
-  | "improve"
-  | "convert"
   | "tests"
   | "projects"
   | "history";
+
+type CodeAction = "debugger" | "improve" | "convert";
 
 type SavedProject = {
   id: string;
@@ -32,8 +31,6 @@ type HistoryItem = {
   details: string;
   date: string;
 };
-
-type UserPlan = "free" | "pro" | "promax";
 
 function getLanguage(name: string) {
   if (name.endsWith(".html")) return "html";
@@ -59,9 +56,11 @@ function parseFiles(text: string): ProjectFile[] {
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(text)) !== null) {
+    const name = match[1].trim();
+
     files.push({
-      name: match[1].trim(),
-      language: getLanguage(match[1].trim()),
+      name,
+      language: getLanguage(name),
       code: match[3].trim(),
     });
   }
@@ -113,16 +112,18 @@ export default function Home() {
   const [toolFilename, setToolFilename] = useState("script.js");
   const [toolResult, setToolResult] = useState("");
   const [toolLoading, setToolLoading] = useState(false);
+
   const [targetLanguage, setTargetLanguage] = useState("TypeScript");
+  const [activeAction, setActiveAction] = useState<CodeAction | null>(null);
 
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
-  // CONTA SUPABASE
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [userPlan, setUserPlan] = useState<UserPlan>("free");
+  const [userPlan, setUserPlan] = useState<
+    "free" | "pro" | "promax"
+  >("free");
   const [userCredits, setUserCredits] = useState(0);
-  const [profileLoading, setProfileLoading] = useState(true);
 
   const currentFile = useMemo(
     () => files.find((file) => file.name === selectedFile) ?? null,
@@ -131,39 +132,26 @@ export default function Home() {
 
   useEffect(() => {
     async function loadUser() {
-      try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-        if (!user) {
-          window.location.href = "/login";
-          return;
-        }
+      if (!user) {
+        window.location.href = "/login";
+        return;
+      }
 
-        setUserEmail(user.email ?? null);
+      setUserEmail(user.email ?? null);
 
-        const { data: profile, error } = await supabase
-          .from("profiles")
-          .select("plan, credits")
-          .eq("id", user.id)
-          .single();
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("plan, credits")
+        .eq("id", user.id)
+        .single();
 
-        if (!error && profile) {
-          const plan =
-            profile.plan === "pro" ||
-            profile.plan === "promax" ||
-            profile.plan === "free"
-              ? profile.plan
-              : "free";
-
-          setUserPlan(plan);
-          setUserCredits(profile.credits ?? 0);
-        }
-      } catch (error) {
-        console.error("Erro ao carregar perfil:", error);
-      } finally {
-        setProfileLoading(false);
+      if (profile) {
+        setUserPlan(profile.plan);
+        setUserCredits(profile.credits);
       }
     }
 
@@ -185,18 +173,6 @@ export default function Home() {
     }
   }, []);
 
-  function getPlanName() {
-    if (userPlan === "pro") return "⭐ Pro";
-    if (userPlan === "promax") return "🚀 Pro Max";
-    return "🆓 Free";
-  }
-
-  function getPlanClass() {
-    if (userPlan === "pro") return "plan-pro";
-    if (userPlan === "promax") return "plan-promax";
-    return "plan-free";
-  }
-
   function addHistory(type: string, details: string) {
     const item: HistoryItem = {
       id: Date.now().toString(),
@@ -207,7 +183,12 @@ export default function Home() {
 
     setHistory((old) => {
       const updated = [item, ...old].slice(0, 100);
-      localStorage.setItem("codehub_history", JSON.stringify(updated));
+
+      localStorage.setItem(
+        "codehub_history",
+        JSON.stringify(updated)
+      );
+
       return updated;
     });
   }
@@ -217,7 +198,12 @@ export default function Home() {
 
     setFiles((old) =>
       old.map((file) =>
-        file.name === selectedFile ? { ...file, code } : file
+        file.name === selectedFile
+          ? {
+              ...file,
+              code,
+            }
+          : file
       )
     );
   }
@@ -226,11 +212,6 @@ export default function Home() {
     setActiveTool(tool);
     setPreview(false);
     setToolResult("");
-
-    if (currentFile) {
-      setToolCode(currentFile.code);
-      setToolFilename(currentFile.name);
-    }
   }
 
   async function generateCode() {
@@ -243,14 +224,20 @@ export default function Home() {
     try {
       const result = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          prompt,
+        }),
       });
 
       const data = await result.json();
 
       if (!result.ok) {
-        throw new Error(data.error || "Erro ao gerar projeto.");
+        throw new Error(
+          data.error || "Erro ao gerar projeto."
+        );
       }
 
       const generatedFiles = parseFiles(data.response || "");
@@ -269,9 +256,15 @@ export default function Home() {
             .slice(0, 40) || "Novo projeto";
 
         setProjectName(name);
-        addHistory("Gerador", `Projeto criado: ${name}`);
+
+        addHistory(
+          "Gerador",
+          `Projeto criado: ${name}`
+        );
       } else {
-        setResponse(data.response || "A IA não devolveu código.");
+        setResponse(
+          data.response || "A IA não devolveu código."
+        );
       }
     } catch (error) {
       setResponse(
@@ -291,7 +284,10 @@ export default function Home() {
 
     const updated = [
       ...chatMessages,
-      { role: "user" as const, content: message },
+      {
+        role: "user" as const,
+        content: message,
+      },
     ];
 
     setChatMessages(updated);
@@ -301,7 +297,9 @@ export default function Home() {
     try {
       const result = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           message,
           history: chatMessages,
@@ -311,7 +309,9 @@ export default function Home() {
       const data = await result.json();
 
       if (!result.ok) {
-        throw new Error(data.error || "Erro no AI Chat.");
+        throw new Error(
+          data.error || "Erro no AI Chat."
+        );
       }
 
       setChatMessages([
@@ -322,7 +322,10 @@ export default function Home() {
         },
       ]);
 
-      addHistory("AI Chat", message.slice(0, 60));
+      addHistory(
+        "AI Chat",
+        message.slice(0, 60)
+      );
     } catch (error) {
       setChatMessages([
         ...updated,
@@ -339,66 +342,90 @@ export default function Home() {
     }
   }
 
-  async function runCodeTool(tool: "debugger" | "improve" | "convert") {
-    const code = currentFile?.code || toolCode;
+  async function runCodeAction(action: CodeAction) {
+    if (!currentFile) {
+      alert("Seleciona primeiro um ficheiro.");
+      return;
+    }
 
-    if (!code.trim() || toolLoading) return;
+    if (!currentFile.code.trim()) {
+      alert("Este ficheiro não tem código.");
+      return;
+    }
+
+    if (toolLoading) return;
 
     setToolLoading(true);
+    setActiveAction(action);
     setToolResult("");
 
     const endpoint =
-      tool === "debugger"
+      action === "debugger"
         ? "/api/fix"
-        : tool === "improve"
+        : action === "improve"
           ? "/api/improve"
           : "/api/convert";
 
     try {
       const body: Record<string, string> = {
-        code,
-        filename: currentFile?.name || toolFilename,
+        code: currentFile.code,
+        filename: currentFile.name,
       };
 
-      if (tool === "convert") {
+      if (action === "convert") {
         body.targetLanguage = targetLanguage;
       }
 
       const result = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify(body),
       });
 
       const data = await result.json();
 
       if (!result.ok) {
-        throw new Error(data.error || "Erro na operação.");
+        throw new Error(
+          data.error || "Erro na operação."
+        );
       }
 
       const newCode = data.code || "";
 
-      setToolCode(newCode);
-      setToolResult(newCode);
-
-      if (currentFile) {
-        updateCurrentFile(newCode);
+      if (!newCode.trim()) {
+        throw new Error(
+          "A IA não devolveu código."
+        );
       }
 
+      updateCurrentFile(newCode);
+
+      setToolCode(newCode);
+      setToolFilename(currentFile.name);
+      setToolResult(newCode);
+
+      const actionName =
+        action === "debugger"
+          ? "Código corrigido"
+          : action === "improve"
+            ? "Código melhorado"
+            : "Código convertido";
+
       addHistory(
-        tool === "debugger"
-          ? "Debugger"
-          : tool === "improve"
-            ? "Melhorar código"
-            : "Converter código",
-        currentFile?.name || toolFilename
+        actionName,
+        currentFile.name
       );
     } catch (error) {
-      setToolResult(
-        error instanceof Error ? error.message : "Ocorreu um erro."
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Ocorreu um erro."
       );
     } finally {
       setToolLoading(false);
+      setActiveAction(null);
     }
   }
 
@@ -413,28 +440,37 @@ export default function Home() {
     try {
       const result = await fetch("/api/tests", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           code,
-          filename: currentFile?.name || toolFilename,
+          filename:
+            currentFile?.name || toolFilename,
         }),
       });
 
       const data = await result.json();
 
       if (!result.ok) {
-        throw new Error(data.error || "Erro ao gerar testes.");
+        throw new Error(
+          data.error || "Erro ao gerar testes."
+        );
       }
 
       setToolResult(data.response || "");
 
       addHistory(
         "Testes",
-        `Testes analisados para ${currentFile?.name || toolFilename}`
+        `Testes analisados para ${
+          currentFile?.name || toolFilename
+        }`
       );
     } catch (error) {
       setToolResult(
-        error instanceof Error ? error.message : "Ocorreu um erro."
+        error instanceof Error
+          ? error.message
+          : "Ocorreu um erro."
       );
     } finally {
       setToolLoading(false);
@@ -443,53 +479,80 @@ export default function Home() {
 
   function saveProject() {
     if (files.length === 0) {
-      alert("Não tens nenhum projeto para guardar.");
+      alert(
+        "Não tens nenhum projeto para guardar."
+      );
       return;
     }
 
     const existing = projects.find(
-      (project) => project.name === projectName
+      (project) =>
+        project.name === projectName
     );
 
     const project: SavedProject = {
-      id: existing?.id || Date.now().toString(),
-      name: projectName || "Novo projeto",
+      id:
+        existing?.id ||
+        Date.now().toString(),
+      name:
+        projectName || "Novo projeto",
       files,
-      updatedAt: new Date().toISOString(),
+      updatedAt:
+        new Date().toISOString(),
     };
 
     const updated = [
       project,
-      ...projects.filter((item) => item.id !== project.id),
+      ...projects.filter(
+        (item) => item.id !== project.id
+      ),
     ];
 
     setProjects(updated);
-    localStorage.setItem("codehub_projects", JSON.stringify(updated));
 
-    addHistory("Projetos", `Projeto guardado: ${project.name}`);
-    alert("Projeto guardado localmente.");
+    localStorage.setItem(
+      "codehub_projects",
+      JSON.stringify(updated)
+    );
+
+    addHistory(
+      "Projetos",
+      `Projeto guardado: ${project.name}`
+    );
+
+    alert(
+      "Projeto guardado localmente."
+    );
   }
 
   function openProject(project: SavedProject) {
     setFiles(project.files);
     setProjectName(project.name);
-    setSelectedFile(project.files[0]?.name || null);
+    setSelectedFile(
+      project.files[0]?.name || null
+    );
     setActiveTool("generator");
     setPreview(false);
-
-    addHistory("Projetos", `Projeto aberto: ${project.name}`);
   }
 
   function deleteProject(id: string) {
-    const updated = projects.filter((project) => project.id !== id);
+    const updated = projects.filter(
+      (project) => project.id !== id
+    );
 
     setProjects(updated);
-    localStorage.setItem("codehub_projects", JSON.stringify(updated));
+
+    localStorage.setItem(
+      "codehub_projects",
+      JSON.stringify(updated)
+    );
   }
 
   function clearHistory() {
     setHistory([]);
-    localStorage.removeItem("codehub_history");
+    localStorage.removeItem(
+      "codehub_history"
+    );
   }
 
   function newProject() {
@@ -501,25 +564,37 @@ export default function Home() {
     setProjectName("Novo projeto");
     setToolCode("");
     setToolResult("");
+    setActiveAction(null);
     setActiveTool("generator");
   }
 
   async function copyCode() {
     if (!currentFile) return;
 
-    await navigator.clipboard.writeText(currentFile.code);
+    await navigator.clipboard.writeText(
+      currentFile.code
+    );
+
     setCopied(true);
 
-    setTimeout(() => setCopied(false), 1500);
+    setTimeout(() => {
+      setCopied(false);
+    }, 1500);
   }
 
   function downloadFile(file: ProjectFile) {
-    const blob = new Blob([file.code], {
-      type: "text/plain;charset=utf-8",
-    });
+    const blob = new Blob(
+      [file.code],
+      {
+        type: "text/plain;charset=utf-8",
+      }
+    );
 
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
+    const url =
+      URL.createObjectURL(blob);
+
+    const link =
+      document.createElement("a");
 
     link.href = url;
     link.download = file.name;
@@ -530,14 +605,24 @@ export default function Home() {
 
   function downloadProject() {
     files.forEach((file, index) => {
-      setTimeout(() => downloadFile(file), index * 200);
+      setTimeout(() => {
+        downloadFile(file);
+      }, index * 200);
     });
   }
 
   function buildPreview() {
-    const htmlFile = files.find((file) => file.name === "index.html");
-    const cssFile = files.find((file) => file.name === "styles.css");
-    const jsFile = files.find((file) => file.name === "script.js");
+    const htmlFile = files.find(
+      (file) => file.name === "index.html"
+    );
+
+    const cssFile = files.find(
+      (file) => file.name === "styles.css"
+    );
+
+    const jsFile = files.find(
+      (file) => file.name === "script.js"
+    );
 
     if (!htmlFile) {
       return "<h1>index.html não encontrado</h1>";
@@ -546,20 +631,28 @@ export default function Home() {
     let html = htmlFile.code;
 
     if (cssFile) {
-      const css = `<style>${cssFile.code}</style>`;
+      const css =
+        `<style>${cssFile.code}</style>`;
 
       if (html.includes("</head>")) {
-        html = html.replace("</head>", `${css}</head>`);
+        html = html.replace(
+          "</head>",
+          `${css}</head>`
+        );
       } else {
         html = css + html;
       }
     }
 
     if (jsFile) {
-      const js = `<script>${jsFile.code}</script>`;
+      const js =
+        `<script>${jsFile.code}</script>`;
 
       if (html.includes("</body>")) {
-        html = html.replace("</body>", `${js}</body>`);
+        html = html.replace(
+          "</body>",
+          `${js}</body>`
+        );
       } else {
         html += js;
       }
@@ -579,12 +672,16 @@ export default function Home() {
         <div className="tool-header">
           <div>
             <h1>✦ AI Chat</h1>
-            <p>Fala diretamente com o CodeHub AI.</p>
+            <p>
+              Fala diretamente com o CodeHub AI.
+            </p>
           </div>
 
           <button
             className="secondary-button"
-            onClick={() => setChatMessages([])}
+            onClick={() =>
+              setChatMessages([])
+            }
           >
             Limpar chat
           </button>
@@ -594,33 +691,50 @@ export default function Home() {
           <div className="chat-messages">
             {chatMessages.length === 0 && (
               <div className="empty-tool">
-                <div className="big-icon">✦</div>
-                <h2>Como posso ajudar?</h2>
+                <div className="big-icon">
+                  ✦
+                </div>
+
+                <h2>
+                  Como posso ajudar?
+                </h2>
+
                 <p>
-                  Pergunta sobre programação, debugging, projetos ou código.
+                  Pergunta sobre programação,
+                  debugging, projetos ou código.
                 </p>
               </div>
             )}
 
-            {chatMessages.map((message, index) => (
-              <div
-                key={index}
-                className={`chat-message ${message.role}`}
-              >
-                <div className="message-role">
-                  {message.role === "user" ? "Tu" : "CodeHub AI"}
-                </div>
+            {chatMessages.map(
+              (message, index) => (
+                <div
+                  key={index}
+                  className={`chat-message ${message.role}`}
+                >
+                  <div className="message-role">
+                    {message.role ===
+                    "user"
+                      ? "Tu"
+                      : "CodeHub AI"}
+                  </div>
 
-                <div className="message-content">
-                  {message.content}
+                  <div className="message-content">
+                    {message.content}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            )}
 
             {chatLoading && (
               <div className="chat-message assistant">
-                <div className="message-role">CodeHub AI</div>
-                <div className="message-content">A pensar...</div>
+                <div className="message-role">
+                  CodeHub AI
+                </div>
+
+                <div className="message-content">
+                  A pensar...
+                </div>
               </div>
             )}
           </div>
@@ -628,9 +742,16 @@ export default function Home() {
           <div className="chat-input">
             <textarea
               value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
+              onChange={(e) =>
+                setChatInput(
+                  e.target.value
+                )
+              }
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
+                if (
+                  e.key === "Enter" &&
+                  !e.shiftKey
+                ) {
                   e.preventDefault();
                   sendChatMessage();
                 }
@@ -640,90 +761,16 @@ export default function Home() {
 
             <button
               className="generate-button"
-              onClick={sendChatMessage}
-              disabled={chatLoading || !chatInput.trim()}
+              onClick={
+                sendChatMessage
+              }
+              disabled={
+                chatLoading ||
+                !chatInput.trim()
+              }
             >
               Enviar ✦
             </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function renderCodeTool(
-    title: string,
-    description: string,
-    tool: "debugger" | "improve" | "convert"
-  ) {
-    return (
-      <div className="tool-page">
-        <div className="tool-header">
-          <div>
-            <h1>{title}</h1>
-            <p>{description}</p>
-          </div>
-        </div>
-
-        <div className="tool-grid">
-          <div className="tool-card">
-            <div className="field-row">
-              <input
-                value={toolFilename}
-                onChange={(e) => setToolFilename(e.target.value)}
-                placeholder="Nome do ficheiro"
-              />
-
-              {tool === "convert" && (
-                <select
-                  value={targetLanguage}
-                  onChange={(e) => setTargetLanguage(e.target.value)}
-                >
-                  <option>TypeScript</option>
-                  <option>JavaScript</option>
-                  <option>Python</option>
-                  <option>Java</option>
-                  <option>C#</option>
-                  <option>C++</option>
-                  <option>HTML</option>
-                  <option>CSS</option>
-                </select>
-              )}
-            </div>
-
-            <textarea
-              className="tool-code"
-              value={toolCode}
-              onChange={(e) => setToolCode(e.target.value)}
-              placeholder="Cola aqui o teu código..."
-              spellCheck={false}
-            />
-
-            <button
-              className="generate-button wide"
-              onClick={() => runCodeTool(tool)}
-              disabled={toolLoading || !toolCode.trim()}
-            >
-              {toolLoading
-                ? "🔄 A trabalhar..."
-                : tool === "debugger"
-                  ? "🐞 Corrigir código"
-                  : tool === "improve"
-                    ? "✦ Melhorar código"
-                    : "↔ Converter código"}
-            </button>
-          </div>
-
-          <div className="tool-card result-card">
-            <div className="result-title">Resultado</div>
-
-            {toolResult ? (
-              <pre>{toolResult}</pre>
-            ) : (
-              <div className="empty-result">
-                O resultado aparecerá aqui.
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -736,15 +783,25 @@ export default function Home() {
         <div className="tool-header">
           <div>
             <h1>✓ Testes</h1>
-            <p>Analisa o código e gera testes e casos de teste.</p>
+            <p>
+              Analisa o código e gera testes
+              e casos de teste.
+            </p>
           </div>
         </div>
 
         <div className="tool-card tests-card">
           <textarea
             className="tool-code"
-            value={toolCode}
-            onChange={(e) => setToolCode(e.target.value)}
+            value={
+              currentFile?.code ||
+              toolCode
+            }
+            onChange={(e) =>
+              setToolCode(
+                e.target.value
+              )
+            }
             placeholder="Cola aqui o código que queres testar..."
             spellCheck={false}
           />
@@ -752,13 +809,23 @@ export default function Home() {
           <button
             className="generate-button wide"
             onClick={runTests}
-            disabled={toolLoading || !toolCode.trim()}
+            disabled={
+              toolLoading ||
+              !(
+                currentFile?.code ||
+                toolCode
+              ).trim()
+            }
           >
-            {toolLoading ? "🔄 A analisar..." : "✓ Gerar testes"}
+            {toolLoading
+              ? "🔄 A analisar..."
+              : "✓ Gerar testes"}
           </button>
 
           {toolResult && (
-            <pre className="test-result">{toolResult}</pre>
+            <pre className="test-result">
+              {toolResult}
+            </pre>
           )}
         </div>
       </div>
@@ -771,7 +838,10 @@ export default function Home() {
         <div className="tool-header">
           <div>
             <h1>📁 Projetos</h1>
-            <p>Os teus projetos ficam guardados neste navegador.</p>
+            <p>
+              Os teus projetos ficam
+              guardados neste navegador.
+            </p>
           </div>
 
           <button
@@ -785,36 +855,68 @@ export default function Home() {
 
         {projects.length === 0 ? (
           <div className="empty-tool">
-            <div className="big-icon">📁</div>
-            <h2>Nenhum projeto guardado</h2>
-            <p>Cria um projeto e guarda-o para aparecer aqui.</p>
+            <div className="big-icon">
+              📁
+            </div>
+
+            <h2>
+              Nenhum projeto guardado
+            </h2>
+
+            <p>
+              Cria um projeto e guarda-o
+              para aparecer aqui.
+            </p>
           </div>
         ) : (
           <div className="projects-grid">
             {projects.map((project) => (
-              <div className="project-card" key={project.id}>
-                <div className="project-icon">📁</div>
+              <div
+                className="project-card"
+                key={project.id}
+              >
+                <div className="project-icon">
+                  📁
+                </div>
 
                 <div className="project-info">
-                  <strong>{project.name}</strong>
-                  <span>{project.files.length} ficheiros</span>
+                  <strong>
+                    {project.name}
+                  </strong>
+
+                  <span>
+                    {project.files.length}{" "}
+                    ficheiros
+                  </span>
 
                   <small>
-                    {new Date(project.updatedAt).toLocaleString("pt-PT")}
+                    {new Date(
+                      project.updatedAt
+                    ).toLocaleString(
+                      "pt-PT"
+                    )}
                   </small>
                 </div>
 
                 <div className="project-actions">
                   <button
                     className="small-button"
-                    onClick={() => openProject(project)}
+                    onClick={() =>
+                      openProject(
+                        project
+                      )
+                    }
                   >
                     Abrir
                   </button>
 
                   <button
                     className="small-button danger"
-                    onClick={() => deleteProject(project.id)}
+                    onClick={() =>
+                      deleteProject(
+                        project.id
+                      )
+                    }
                   >
                     Apagar
                   </button>
@@ -833,11 +935,17 @@ export default function Home() {
         <div className="tool-header">
           <div>
             <h1>◷ Histórico</h1>
-            <p>Vê o que fizeste recentemente no CodeHub AI.</p>
+            <p>
+              Vê o que fizeste recentemente
+              no CodeHub AI.
+            </p>
           </div>
 
           {history.length > 0 && (
-            <button className="secondary-button" onClick={clearHistory}>
+            <button
+              className="secondary-button"
+              onClick={clearHistory}
+            >
               Limpar histórico
             </button>
           )}
@@ -845,22 +953,42 @@ export default function Home() {
 
         {history.length === 0 ? (
           <div className="empty-tool">
-            <div className="big-icon">◷</div>
-            <h2>Histórico vazio</h2>
-            <p>As tuas ações aparecerão aqui.</p>
+            <div className="big-icon">
+              ◷
+            </div>
+
+            <h2>
+              Histórico vazio
+            </h2>
+
+            <p>
+              As tuas ações aparecerão aqui.
+            </p>
           </div>
         ) : (
           <div className="history-list">
             {history.map((item) => (
-              <div className="history-item" key={item.id}>
-                <div className="history-icon">✦</div>
-
-                <div>
-                  <strong>{item.type}</strong>
-                  <p>{item.details}</p>
+              <div
+                className="history-item"
+                key={item.id}
+              >
+                <div className="history-icon">
+                  ✦
                 </div>
 
-                <time>{item.date}</time>
+                <div>
+                  <strong>
+                    {item.type}
+                  </strong>
+
+                  <p>
+                    {item.details}
+                  </p>
+                </div>
+
+                <time>
+                  {item.date}
+                </time>
               </div>
             ))}
           </div>
@@ -875,20 +1003,31 @@ export default function Home() {
         <div className="editor-page">
           <header className="editor-header">
             <div className="brand">
-              <div className="brand-logo">C</div>
+              <div className="brand-logo">
+                C
+              </div>
 
               <div>
-                <div className="brand-name">CodeHub AI</div>
-                <div className="project-title">{projectName}</div>
+                <div className="brand-name">
+                  CodeHub AI
+                </div>
+
+                <div className="project-title">
+                  {projectName}
+                </div>
               </div>
             </div>
 
             <div className="header-actions">
               <button
                 className="secondary-button"
-                onClick={() => setPreview(!preview)}
+                onClick={() =>
+                  setPreview(!preview)
+                }
               >
-                {preview ? "⌨️ Editor" : "▶️ Pré-visualizar"}
+                {preview
+                  ? "⌨️ Editor"
+                  : "▶️ Pré-visualizar"}
               </button>
 
               <button
@@ -900,12 +1039,17 @@ export default function Home() {
 
               <button
                 className="secondary-button"
-                onClick={downloadProject}
+                onClick={
+                  downloadProject
+                }
               >
                 ⬇️ Descarregar
               </button>
 
-              <button className="new-button" onClick={newProject}>
+              <button
+                className="new-button"
+                onClick={newProject}
+              >
                 + Novo
               </button>
             </div>
@@ -914,8 +1058,13 @@ export default function Home() {
           <div className="editor-layout">
             <aside className="file-sidebar">
               <div className="sidebar-title">
-                <span>Ficheiros</span>
-                <span className="file-count">{files.length}</span>
+                <span>
+                  Ficheiros
+                </span>
+
+                <span className="file-count">
+                  {files.length}
+                </span>
               </div>
 
               <div className="file-list">
@@ -923,31 +1072,46 @@ export default function Home() {
                   <button
                     key={file.name}
                     onClick={() => {
-                      setSelectedFile(file.name);
+                      setSelectedFile(
+                        file.name
+                      );
                       setPreview(false);
                     }}
                     className={`file-item ${
-                      file.name === selectedFile ? "active" : ""
+                      file.name ===
+                      selectedFile
+                        ? "active"
+                        : ""
                     }`}
                   >
                     <span>
-                      {file.name.endsWith(".html")
+                      {file.name.endsWith(
+                        ".html"
+                      )
                         ? "🌐"
-                        : file.name.endsWith(".css")
+                        : file.name.endsWith(
+                              ".css"
+                            )
                           ? "🎨"
-                          : file.name.endsWith(".js")
+                          : file.name.endsWith(
+                                ".js"
+                              )
                             ? "⚡"
                             : "📄"}
                     </span>
 
-                    <span>{file.name}</span>
+                    <span>
+                      {file.name}
+                    </span>
                   </button>
                 ))}
               </div>
 
               <button
                 className="back-button"
-                onClick={() => setFiles([])}
+                onClick={() =>
+                  setFiles([])
+                }
               >
                 ← Voltar ao início
               </button>
@@ -957,58 +1121,133 @@ export default function Home() {
               {!preview ? (
                 <>
                   <div className="workspace-header">
-                    <strong>{currentFile?.name}</strong>
+                    <div className="workspace-file">
+                      <strong>
+                        {currentFile?.name}
+                      </strong>
 
-                    {currentFile && (
-                      <div className="editor-actions">
+                      {currentFile && (
                         <span className="language">
                           {currentFile.language}
                         </span>
+                      )}
+                    </div>
+
+                    {currentFile && (
+                      <div className="editor-actions">
+                        <button
+                          className="action-button fix"
+                          onClick={() =>
+                            runCodeAction(
+                              "debugger"
+                            )
+                          }
+                          disabled={
+                            toolLoading
+                          }
+                        >
+                          {activeAction ===
+                          "debugger"
+                            ? "🔄 A corrigir..."
+                            : "🐞 Corrigir"}
+                        </button>
 
                         <button
-                          className="small-button"
-                          onClick={() => {
-                            setToolCode(currentFile.code);
-                            setToolFilename(currentFile.name);
-                            setActiveTool("debugger");
-                          }}
+                          className="action-button improve"
+                          onClick={() =>
+                            runCodeAction(
+                              "improve"
+                            )
+                          }
+                          disabled={
+                            toolLoading
+                          }
                         >
-                          🐞 Corrigir
+                          {activeAction ===
+                          "improve"
+                            ? "🔄 A melhorar..."
+                            : "✦ Melhorar"}
+                        </button>
+
+                        <select
+                          className="convert-select"
+                          value={
+                            targetLanguage
+                          }
+                          onChange={(e) =>
+                            setTargetLanguage(
+                              e.target.value
+                            )
+                          }
+                        >
+                          <option>
+                            TypeScript
+                          </option>
+
+                          <option>
+                            JavaScript
+                          </option>
+
+                          <option>
+                            Python
+                          </option>
+
+                          <option>
+                            Java
+                          </option>
+
+                          <option>
+                            C#
+                          </option>
+
+                          <option>
+                            C++
+                          </option>
+
+                          <option>
+                            HTML
+                          </option>
+
+                          <option>
+                            CSS
+                          </option>
+                        </select>
+
+                        <button
+                          className="action-button convert"
+                          onClick={() =>
+                            runCodeAction(
+                              "convert"
+                            )
+                          }
+                          disabled={
+                            toolLoading
+                          }
+                        >
+                          {activeAction ===
+                          "convert"
+                            ? "🔄 A converter..."
+                            : "↔ Converter"}
                         </button>
 
                         <button
                           className="small-button"
-                          onClick={() => {
-                            setToolCode(currentFile.code);
-                            setToolFilename(currentFile.name);
-                            setActiveTool("improve");
-                          }}
+                          onClick={
+                            copyCode
+                          }
                         >
-                          ✦ Melhorar
-                        </button>
-
-                        <button
-                          className="small-button"
-                          onClick={() => {
-                            setToolCode(currentFile.code);
-                            setToolFilename(currentFile.name);
-                            setActiveTool("convert");
-                          }}
-                        >
-                          ↔ Converter
-                        </button>
-
-                        <button
-                          className="small-button"
-                          onClick={copyCode}
-                        >
-                          {copied ? "✓ Copiado" : "📋 Copiar"}
+                          {copied
+                            ? "✓ Copiado"
+                            : "📋 Copiar"}
                         </button>
 
                         <button
                           className="small-button"
                           onClick={() =>
-                            currentFile && downloadFile(currentFile)
+                            currentFile &&
+                            downloadFile(
+                              currentFile
+                            )
                           }
                         >
                           ⬇️ Guardar
@@ -1017,16 +1256,33 @@ export default function Home() {
                     )}
                   </div>
 
+                  {toolLoading && (
+                    <div className="action-loading">
+                      <div className="mini-spinner" />
+                      <span>
+                        O CodeHub AI está a trabalhar
+                        neste código...
+                      </span>
+                    </div>
+                  )}
+
                   <div className="editor-container">
                     {currentFile ? (
                       <CodeEditor
                         file={currentFile}
-                        onChange={updateCurrentFile}
+                        onChange={
+                          updateCurrentFile
+                        }
                       />
                     ) : (
                       <div className="empty-editor">
-                        <div>📁</div>
-                        <h2>Seleciona um ficheiro</h2>
+                        <div>
+                          📁
+                        </div>
+
+                        <h2>
+                          Seleciona um ficheiro
+                        </h2>
                       </div>
                     )}
                   </div>
@@ -1034,11 +1290,15 @@ export default function Home() {
               ) : (
                 <div className="preview-container">
                   <div className="preview-header">
-                    <strong>▶️ Pré-visualização</strong>
+                    <strong>
+                      ▶️ Pré-visualização
+                    </strong>
 
                     <button
                       className="small-button"
-                      onClick={() => setPreview(false)}
+                      onClick={() =>
+                        setPreview(false)
+                      }
                     >
                       ✕ Fechar
                     </button>
@@ -1061,22 +1321,33 @@ export default function Home() {
     return (
       <div className="generator-page">
         <div className="hero">
-          <div className="hero-icon">✦</div>
+          <div className="hero-icon">
+            ✦
+          </div>
 
           <h1>
-            O que vamos <span>criar?</span>
+            O que vamos{" "}
+            <span>criar?</span>
           </h1>
 
           <p>
-            Descreve o que queres construir e o CodeHub AI cria o projeto.
+            Descreve o que queres construir
+            e o CodeHub AI cria o projeto.
           </p>
 
           <div className="prompt-box">
             <textarea
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
+              onChange={(e) =>
+                setPrompt(
+                  e.target.value
+                )
+              }
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
+                if (
+                  e.key === "Enter" &&
+                  !e.shiftKey
+                ) {
                   e.preventDefault();
                   generateCode();
                 }
@@ -1086,15 +1357,23 @@ export default function Home() {
 
             <div className="prompt-footer">
               <span>
-                Enter para gerar • Shift + Enter para nova linha
+                Enter para gerar • Shift +
+                Enter para nova linha
               </span>
 
               <button
                 className="generate-button"
-                onClick={generateCode}
-                disabled={loading || !prompt.trim()}
+                onClick={
+                  generateCode
+                }
+                disabled={
+                  loading ||
+                  !prompt.trim()
+                }
               >
-                {loading ? "A gerar..." : "✦ Gerar projeto"}
+                {loading
+                  ? "A gerar..."
+                  : "✦ Gerar projeto"}
               </button>
             </div>
           </div>
@@ -1134,17 +1413,30 @@ export default function Home() {
           {loading && (
             <div className="loading-box">
               <div className="loading-spinner" />
-              <strong>O CodeHub AI está a criar...</strong>
-              <span>A escrever e verificar o código.</span>
+
+              <strong>
+                O CodeHub AI está a criar...
+              </strong>
+
+              <span>
+                A escrever e verificar o
+                código.
+              </span>
             </div>
           )}
 
-          {response && !loading && (
-            <div className="response-box">
-              <strong>Resposta da IA</strong>
-              <pre>{response}</pre>
-            </div>
-          )}
+          {response &&
+            !loading && (
+              <div className="response-box">
+                <strong>
+                  Resposta da IA
+                </strong>
+
+                <pre>
+                  {response}
+                </pre>
+              </div>
+            )}
         </div>
       </div>
     );
@@ -1154,27 +1446,6 @@ export default function Home() {
     switch (activeTool) {
       case "chat":
         return renderChat();
-
-      case "debugger":
-        return renderCodeTool(
-          "🐞 Debugger",
-          "Encontra e corrige problemas no teu código.",
-          "debugger"
-        );
-
-      case "improve":
-        return renderCodeTool(
-          "✦ Melhorar código",
-          "Torna o código mais limpo, organizado e eficiente.",
-          "improve"
-        );
-
-      case "convert":
-        return renderCodeTool(
-          "↔ Converter código",
-          "Converte o teu código para outra linguagem.",
-          "convert"
-        );
 
       case "tests":
         return renderTests();
@@ -1194,96 +1465,107 @@ export default function Home() {
     <div className="app">
       <aside className="sidebar">
         <div className="home-brand">
-          <div className="home-logo">C</div>
-          <strong>CodeHub AI</strong>
+          <div className="home-logo">
+            C
+          </div>
+
+          <strong>
+            CodeHub AI
+          </strong>
         </div>
 
-        <button className="create-button" onClick={newProject}>
+        <button
+          className="create-button"
+          onClick={newProject}
+        >
           + Novo projeto
         </button>
 
         <nav>
           <button
             className={`nav-item ${
-              activeTool === "chat" ? "active" : ""
+              activeTool === "chat"
+                ? "active"
+                : ""
             }`}
-            onClick={() => selectTool("chat")}
+            onClick={() =>
+              selectTool("chat")
+            }
           >
             ✦ AI Chat
           </button>
 
           <button
             className={`nav-item ${
-              activeTool === "generator" ? "active" : ""
+              activeTool ===
+              "generator"
+                ? "active"
+                : ""
             }`}
-            onClick={() => selectTool("generator")}
+            onClick={() =>
+              selectTool(
+                "generator"
+              )
+            }
           >
             ⌘ Gerador de código
           </button>
 
           <button
             className={`nav-item ${
-              activeTool === "debugger" ? "active" : ""
+              activeTool === "tests"
+                ? "active"
+                : ""
             }`}
-            onClick={() => selectTool("debugger")}
-          >
-            🐞 Debugger
-          </button>
-
-          <button
-            className={`nav-item ${
-              activeTool === "improve" ? "active" : ""
-            }`}
-            onClick={() => selectTool("improve")}
-          >
-            ✦ Melhorar código
-          </button>
-
-          <button
-            className={`nav-item ${
-              activeTool === "convert" ? "active" : ""
-            }`}
-            onClick={() => selectTool("convert")}
-          >
-            ↔ Converter código
-          </button>
-
-          <button
-            className={`nav-item ${
-              activeTool === "tests" ? "active" : ""
-            }`}
-            onClick={() => selectTool("tests")}
+            onClick={() =>
+              selectTool("tests")
+            }
           >
             ✓ Testes
           </button>
 
           <button
             className={`nav-item ${
-              activeTool === "projects" ? "active" : ""
+              activeTool ===
+              "projects"
+                ? "active"
+                : ""
             }`}
-            onClick={() => selectTool("projects")}
+            onClick={() =>
+              selectTool(
+                "projects"
+              )
+            }
           >
             📁 Projetos
           </button>
 
           <button
             className={`nav-item ${
-              activeTool === "history" ? "active" : ""
+              activeTool ===
+              "history"
+                ? "active"
+                : ""
             }`}
-            onClick={() => selectTool("history")}
+            onClick={() =>
+              selectTool(
+                "history"
+              )
+            }
           >
             ◷ Histórico
           </button>
         </nav>
 
         <div className="sidebar-bottom">
-
-          {/* CONTA */}
           <div className="account-box">
-            <div className="account-label">Conta</div>
+            <div className="account-label">
+              Conta
+            </div>
 
             <div className="account-email">
-              {userEmail || "A carregar..."}
+              {userEmail ||
+                "A carregar..."}
             </div>
 
             <button
@@ -1294,50 +1576,42 @@ export default function Home() {
             </button>
           </div>
 
-          {/* PLANO */}
-          <div className={`plan-box ${getPlanClass()}`}>
-            <div className="plan-box-header">
-              <div>
-                <span className="plan-label">PLANO ATUAL</span>
+          <div className="plan-box">
+            <div className="plan-box-top">
+              <span>
+                PLANO
+              </span>
 
-                <strong className="plan-name">
-                  {profileLoading ? "A carregar..." : getPlanName()}
-                </strong>
-              </div>
-
-              <div className="plan-icon">
+              <strong>
                 {userPlan === "free"
-                  ? "🆓"
+                  ? "🆓 Free"
                   : userPlan === "pro"
-                    ? "⭐"
-                    : "🚀"}
-              </div>
+                    ? "⭐ Pro"
+                    : "🚀 Pro Max"}
+              </strong>
             </div>
 
             <div className="credits-row">
-              <span>Créditos</span>
+              <span>
+                Créditos
+              </span>
 
               <strong>
-                {profileLoading ? "..." : userCredits}
+                {userCredits}
               </strong>
             </div>
 
             <button
               className="upgrade-button"
               onClick={() => {
-                window.location.href = "/pricing";
+                window.location.href =
+                  "/pricing";
               }}
             >
               {userPlan === "free"
                 ? "⭐ Ver planos"
                 : "⚡ Gerir plano"}
             </button>
-          </div>
-
-          {/* GEMINI */}
-          <div className="credits">
-            <span>IA</span>
-            <strong>Gemini Online</strong>
           </div>
 
           <div className="gemini-status">
@@ -1347,7 +1621,9 @@ export default function Home() {
         </div>
       </aside>
 
-      <main className="main">{renderContent()}</main>
+      <main className="main">
+        {renderContent()}
+      </main>
 
       <style>{`
         * {
@@ -1372,6 +1648,10 @@ export default function Home() {
 
         button {
           cursor: pointer;
+        }
+
+        button:disabled {
+          cursor: not-allowed;
         }
 
         .app {
@@ -1464,8 +1744,6 @@ export default function Home() {
           margin-top: auto;
         }
 
-        /* CONTA */
-
         .account-box {
           padding: 10px 8px;
           margin-bottom: 8px;
@@ -1504,76 +1782,31 @@ export default function Home() {
           color: white;
         }
 
-        /* PLANO */
-
         .plan-box {
           margin-bottom: 8px;
-          padding: 11px 9px;
+          padding: 10px 8px;
           border: 1px solid #292d36;
-          border-radius: 10px;
+          border-radius: 9px;
           background: #111318;
         }
 
-        .plan-box-header {
+        .plan-box-top {
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 8px;
-          margin-bottom: 11px;
+          margin-bottom: 10px;
         }
 
-        .plan-box-header > div:first-child {
-          min-width: 0;
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-
-        .plan-label {
+        .plan-box-top span,
+        .credits-row span {
           color: #777d88;
-          font-size: 9px;
-          font-weight: 700;
-          letter-spacing: .08em;
+          font-size: 10px;
         }
 
-        .plan-name {
-          color: #f1f1f5;
-          font-size: 12px;
-          font-weight: 750;
-        }
-
-        .plan-icon {
-          width: 30px;
-          height: 30px;
-          display: grid;
-          place-items: center;
-          border-radius: 8px;
-          background: #181a21;
-          font-size: 15px;
-        }
-
-        .plan-free {
-          border-color: #292d36;
-        }
-
-        .plan-pro {
-          border-color: rgba(99, 91, 255, .45);
-          background:
-            linear-gradient(
-              135deg,
-              rgba(99,91,255,.10),
-              #111318
-            );
-        }
-
-        .plan-promax {
-          border-color: rgba(168, 85, 247, .55);
-          background:
-            linear-gradient(
-              135deg,
-              rgba(168,85,247,.12),
-              #111318
-            );
+        .plan-box-top strong {
+          color: #e9eaf0;
+          font-size: 11px;
         }
 
         .credits-row {
@@ -1581,13 +1814,6 @@ export default function Home() {
           justify-content: space-between;
           align-items: center;
           margin-bottom: 9px;
-          padding-top: 8px;
-          border-top: 1px solid #22252d;
-        }
-
-        .credits-row span {
-          color: #777d88;
-          font-size: 10px;
         }
 
         .credits-row strong {
@@ -1603,25 +1829,11 @@ export default function Home() {
           background: #635bff;
           color: white;
           font-size: 11px;
-          font-weight: 700;
-          transition: .15s;
+          font-weight: 650;
         }
 
         .upgrade-button:hover {
           background: #716aff;
-          transform: translateY(-1px);
-        }
-
-        .credits {
-          display: flex;
-          justify-content: space-between;
-          padding: 10px 8px;
-          color: #777d88;
-          font-size: 12px;
-        }
-
-        .credits strong {
-          color: #b4b8c1;
         }
 
         .gemini-status {
@@ -1655,7 +1867,7 @@ export default function Home() {
         }
 
         .hero {
-          width: min(850px,100%);
+          width: min(850px, 100%);
           text-align: center;
         }
 
@@ -1674,12 +1886,16 @@ export default function Home() {
 
         .hero h1 {
           margin: 0;
-          font-size: clamp(34px,5vw,54px);
+          font-size: clamp(34px, 5vw, 54px);
           letter-spacing: -.04em;
         }
 
         .hero h1 span {
-          background: linear-gradient(90deg,#a78bfa,#6366f1);
+          background: linear-gradient(
+            90deg,
+            #a78bfa,
+            #6366f1
+          );
           background-clip: text;
           -webkit-background-clip: text;
           color: transparent;
@@ -1718,6 +1934,7 @@ export default function Home() {
           border-top: 1px solid #202229;
           color: #656b76;
           font-size: 11px;
+          gap: 10px;
         }
 
         .generate-button {
@@ -1759,6 +1976,11 @@ export default function Home() {
           color: #8e949f;
         }
 
+        .suggestions button:hover {
+          color: white;
+          border-color: #3a3f4c;
+        }
+
         .loading-box {
           display: flex;
           flex-direction: column;
@@ -1772,6 +1994,15 @@ export default function Home() {
           width: 26px;
           height: 26px;
           border: 3px solid #292d36;
+          border-top-color: #8178ff;
+          border-radius: 50%;
+          animation: spin .8s linear infinite;
+        }
+
+        .mini-spinner {
+          width: 15px;
+          height: 15px;
+          border: 2px solid #292d36;
           border-top-color: #8178ff;
           border-radius: 50%;
           animation: spin .8s linear infinite;
@@ -1860,33 +2091,9 @@ export default function Home() {
           background: #191c23;
         }
 
-        .tool-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 18px;
-        }
-
         .tool-card {
           margin: 0;
           padding: 15px;
-        }
-
-        .field-row {
-          display: flex;
-          gap: 8px;
-          margin-bottom: 10px;
-        }
-
-        .field-row input,
-        .field-row select {
-          min-width: 0;
-          flex: 1;
-          border: 1px solid #292d36;
-          border-radius: 8px;
-          padding: 9px;
-          background: #111318;
-          color: white;
-          outline: none;
         }
 
         .tool-code {
@@ -1904,20 +2111,17 @@ export default function Home() {
           line-height: 1.6;
         }
 
-        .result-card {
-          padding: 0;
-        }
-
-        .result-card pre {
-          height: 530px;
-          overflow: auto;
-          margin: 0;
+        .test-result {
+          margin: 15px 0 0;
           padding: 15px;
+          border: 1px solid #292d36;
+          border-radius: 9px;
+          background: #090a0d;
           color: #d5d8df;
-          font-size: 12px;
+          max-height: 500px;
+          overflow: auto;
         }
 
-        .empty-result,
         .empty-tool {
           display: grid;
           place-items: center;
@@ -2009,7 +2213,7 @@ export default function Home() {
           display: grid;
           grid-template-columns: repeat(
             auto-fill,
-            minmax(280px,1fr)
+            minmax(280px, 1fr)
           );
           gap: 12px;
         }
@@ -2102,11 +2306,12 @@ export default function Home() {
         }
 
         .editor-header {
-          height: 72px;
+          min-height: 72px;
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0 20px;
+          gap: 15px;
+          padding: 10px 20px;
           border-bottom: 1px solid #202229;
           background: #0b0c10;
         }
@@ -2205,17 +2410,74 @@ export default function Home() {
         }
 
         .workspace-header {
-          min-height: 53px;
+          min-height: 58px;
           display: flex;
           justify-content: space-between;
           align-items: center;
+          gap: 12px;
           padding: 8px 14px;
           border-bottom: 1px solid #202229;
           background: #0d0e12;
         }
 
+        .workspace-file {
+          min-width: 120px;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
         .language {
           color: #6f7580;
+          font-size: 10px;
+          text-transform: uppercase;
+        }
+
+        .action-button {
+          border: 1px solid #353945;
+          border-radius: 8px;
+          padding: 8px 11px;
+          color: #e9eaf0;
+          background: #15171d;
+          font-size: 11px;
+          font-weight: 650;
+        }
+
+        .action-button:hover:not(:disabled) {
+          background: #20232c;
+        }
+
+        .action-button.fix {
+          border-color: #3c3434;
+        }
+
+        .action-button.improve {
+          border-color: #39344a;
+        }
+
+        .action-button.convert {
+          border-color: #30394a;
+        }
+
+        .convert-select {
+          border: 1px solid #292d36;
+          border-radius: 8px;
+          padding: 8px 9px;
+          background: #111318;
+          color: #dfe2e9;
+          font-size: 11px;
+          outline: none;
+        }
+
+        .action-loading {
+          min-height: 34px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 9px;
+          border-bottom: 1px solid #202229;
+          background: #101116;
+          color: #8f94a0;
           font-size: 11px;
         }
 
@@ -2239,6 +2501,19 @@ export default function Home() {
           line-height: 1.65;
         }
 
+        .empty-editor {
+          min-height: 500px;
+          display: grid;
+          place-items: center;
+          align-content: center;
+          color: #6f7580;
+        }
+
+        .empty-editor > div {
+          font-size: 35px;
+          margin-bottom: 10px;
+        }
+
         .preview-container {
           height: 100%;
           display: flex;
@@ -2248,6 +2523,7 @@ export default function Home() {
         .preview-header {
           display: flex;
           justify-content: space-between;
+          align-items: center;
           padding: 10px 14px;
           border-bottom: 1px solid #202229;
         }
@@ -2259,13 +2535,31 @@ export default function Home() {
           background: white;
         }
 
-        @media (max-width: 900px) {
-          .tool-grid {
-            grid-template-columns: 1fr;
+        @media (max-width: 1100px) {
+          .editor-actions {
+            gap: 5px;
           }
 
+          .action-button,
+          .small-button,
+          .convert-select {
+            font-size: 10px;
+            padding: 7px 8px;
+          }
+        }
+
+        @media (max-width: 900px) {
           .sidebar {
             width: 210px;
+          }
+
+          .workspace-header {
+            align-items: flex-start;
+            flex-direction: column;
+          }
+
+          .editor-actions {
+            width: 100%;
           }
         }
 
@@ -2278,10 +2572,9 @@ export default function Home() {
           .home-brand strong,
           .create-button,
           .nav-item,
-          .credits,
+          .plan-box,
           .gemini-status,
-          .account-box,
-          .plan-box {
+          .account-box {
             font-size: 0;
           }
 
@@ -2302,12 +2595,8 @@ export default function Home() {
             padding: 20px 12px;
           }
 
-          .tool-header {
-            align-items: flex-start;
-          }
-
           .editor-header {
-            padding: 0 10px;
+            padding: 10px;
           }
 
           .file-sidebar {
@@ -2318,26 +2607,19 @@ export default function Home() {
             display: none;
           }
 
-          .plan-box {
-            padding: 5px;
+          .prompt-footer {
+            flex-direction: column;
+            align-items: stretch;
           }
 
-          .plan-box-header {
-            justify-content: center;
+          .prompt-footer .generate-button {
+            width: 100%;
           }
 
-          .plan-box-header > div:first-child {
-            display: none;
-          }
-
-          .plan-icon {
-            width: 34px;
-            height: 34px;
-          }
-
-          .credits-row,
-          .upgrade-button {
-            display: none;
+          .editor-actions {
+            overflow-x: auto;
+            flex-wrap: nowrap;
+            padding-bottom: 4px;
           }
         }
       `}</style>
